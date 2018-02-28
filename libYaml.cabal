@@ -1,0 +1,69 @@
+-- This file has been generated from package.yaml by hpack version 0.20.0.
+--
+-- see: https://github.com/sol/hpack
+--
+-- hash: 1d35994052356e2b4b4f0fd3758b1abef71e3e1159a01aea78e80acbab2f8f25
+
+name:           libYaml
+version:        0.1.0.0
+description:    Please see the README on Github at <https://github.com/andymac-2/libYaml#readme>
+homepage:       https://github.com/andymac-2/libYaml#readme
+bug-reports:    https://github.com/andymac-2/libYaml/issues
+author:         Andrew Pritchard
+maintainer:     https://github.com/andymac-2
+copyright:      2018 Andrew Pritchard
+license:        MIT
+license-file:   LICENSE
+build-type:     Simple
+cabal-version:  >= 1.10
+
+extra-source-files:
+    ChangeLog.md
+    README.md
+
+source-repository head
+  type: git
+  location: https://github.com/andymac-2/libYaml
+
+library
+  hs-source-dirs:
+      src
+  build-depends:
+      base >=4.7 && <5
+    , parsec
+    , text
+  exposed-modules:
+      Lib
+  other-modules:
+      Paths_libYaml
+  default-language: Haskell2010
+
+executable yamlDemo-exe
+  main-is: Main.hs
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , libYaml
+    , parsec
+    , text
+  other-modules:
+      Paths_libYaml
+  default-language: Haskell2010
+
+test-suite yaml-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      base >=4.7 && <5
+    , linYaml
+    , parsec
+    , text
+  other-modules:
+      Sandbox
+      Paths_libYaml
+  default-language: Haskell2010
