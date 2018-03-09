@@ -708,7 +708,7 @@ ns_global_tag_prefix = do
     return $ first : rest
     
 -- 96
-c_ns_properties :: Stream s Identity Char => Int -> Context -> YParser s String
+c_ns_properties :: Stream s Identity Char => Int -> Context -> YParser s ()
 c_ns_properties n c = choice
     [ try $ do
         c_ns_tag_property
@@ -721,6 +721,26 @@ c_ns_properties n c = choice
             s_separate n c
             c_ns_tag_property
     ]
+    return () -- TODO: return some useful information
+    
+-- 97
+c_ns_tag_property :: Stream s Identity Char => YParser s String
+c_ns_tag_property = choice
+    [ try $ c_verbatim_tag
+    , try $ c_ns_shorthand_tag
+    , c_non_specific_tag
+    ]
+    
+-- 98
+c_verbatim_tag :: Stream s Identity Char => YParser s String
+c_verbatim_tag = do
+    string "!<"
+    tagName <- many1 ns_uri_char
+    char '>'
+    return $ "!<" ++ tagName ++ ">"
+    
+-- 99
+
     
     
 parseYaml :: YParser a b
