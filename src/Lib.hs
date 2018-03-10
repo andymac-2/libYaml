@@ -39,8 +39,13 @@ data YSymbol
     | B_break               [YSymbol]
     | B_as_line_feed        
     | B_non_content         YSymbol         -- 30
-    
-    
+        
+
+data YSerialNode s
+    = YSNSeq String (s YSerialNode)     -- tag, sequence of nodes
+    | YSNAlias String String            -- tag, alias name
+    | YSNScalar String String           -- tag, content
+    | YSNMap String (m YSerialNode YSerialNode) -- tag, map between nodes
 
 data Context
     = Block_in
@@ -58,7 +63,7 @@ c_printable = satisfy (\c ->
     ( '\x20' <= c && c <= '\x7d')
     || c == '\n' 
     || c == '\r' 
-    || c == '\t' 
+    || c == \t' 
     || c == '\x85' 
     || ( '\xA0' <= c && c <= '\xD7FF')
     || ( '\xE000' <= c && c <= '\xFFFD')
@@ -497,7 +502,7 @@ s_start_of_line = do
     guard (sourceColumn pos == 1)
 
 -- is a Presentation detail: representation in serialisation tree not allowed.
-s_separate_in_line :: Stream s Identity Char => YParser s ()
+s_separate_in_line :: Stream s Identity Char => YParser s () 
 s_separate_in_line = do choice 
     [ do 
         many1 s_white
@@ -533,7 +538,6 @@ l_empty n c = do
         , s_indent_lt_n n
         ]
     b_as_line_feed
-    return '\n'
 
 -- 71
 b_l_trimmed :: Stream s Identity Char => Int -> Context -> YParser s String
@@ -557,12 +561,12 @@ b_l_folded n c = choice
     ]
 
 -- 74
-s_flow_folded :: Stream s Identity Char => Int -> YParser s Char
+s_flow_folded :: Stream s Identity Char => Int -> YParser s String
 s_flow_folded n = do
     optional s_separate_in_line
-    b_l_folded n Flow_in
+    lines <- b_l_folded n Flow_in
     s_flow_line_prefix n
-    return '\n'
+    return lines
     
 -- 75
 c_nb_comment_text :: Stream s Identity Char => YParser s ()
@@ -740,8 +744,178 @@ c_verbatim_tag = do
     return $ "!<" ++ tagName ++ ">"
     
 -- 99
+c_ns_shorthand_tag :: Stream s Identity Char => YParser s String
+c_ns_shorthand_tag = do
+    prefix <- c_tag_handle
+    suffix <- many1 ns_tag_char
+    return prefix ++ suffix
 
+
+-- 100
+c_non_specific_tag :: Stream s Identity Char => YParser s Char 
+c_non_specific_tag = char '!'
+
+
+-- 101
+c_ns_anchor_property :: Stream s Identity Char => YParser s Char  
+c_ns_anchor_property = do
+    char '&'
+    name <- ns_anchor_name
+    return (namew : ns_anchor_name)
+
+-- 102
+ns_anchor_char :: Stream s Identity Char => YParser s Char
+ns_anchor_char = satisfy (\c ->    -- is equal to ns_char except "[]{},"
+    (notElem c "[]{}," ) &&
+        (( '\x21' <= c && c <= '\x7d')
+            || c == '\x85' 
+            || ( '\xA0' <= c && c <= '\xD7FF')
+            || ( '\xE000' <= c && c <= '\xFFFD' && c /= '\xFEFF')
+            || ( '\x10000' <= c && c <= '\x10FFFF'))) 
+    <?> "a non-whitespace character"
+ 
+-- 103
+ns_anchor_name :: Stream s Identity Char => YParser s String
+ns_anchor_name = many1 ns_anchor_char
+
+-- 104
+c_ns_alias_node :: Stream s Identity Char => YParser s String
+c_ns_alias_node = do
+    char '*'
+    ns_anchor_name
+
+-- 105
+e_scalar :: Stream s Identity Char => YParser s ()
+e_scalar = return ()
+
+-- 106
+e_node :: Stream s Identity Char => YParser s ()
+e_node = e_scalar
+
+-- 107
+nb_double_char :: Stream s Identity Char => YParser s Char
+nb_double_char = choice 
+    [ c_ns_esc_char
+    , satisfy (\c -> 
+        (notElem c "\\\"") && 
+            (c == '\x09' 
+            || (c <= '\x10FFFF' && c >= '\x20')))
+    ] 
+
+-- 108
+ns_double_char :: Stream s Identity Char => YParser s Char
+ns_double_char = choice 
+    [ c_ns_esc_char -- same as above but without whitespace
+    , satisfy (\c -> 
+        (notElem c "\\\"\x20\x09") && -- not one of \ " space or tab
+            (c == '\x09' 
+            || (c <= '\x10FFFF' && c >= '\x20')))
+    ] 
+
+-- 109
+c_double_quoted :: Stream s Identity Char => Int -> Context -> YParser s String
+c_double_quoted n c = between (char '"') (char '"') (nb_double_text n c)    
+
+-- 110
+nb_double_text :: Stream s Identity Char => Int -> Context -> YParser s String
+nb_double_text n Flow_out = nb_double_multi_line n
+nb_double_text n Flow_in = nb_double_multi_line n
+nb_double_text _ BLock_key = nb_double_one_line
+nb_double_text _ Flow_key = nb_double_one_line
+
+-- 111
+nb_double_one_line =  Stream s Identity Char => YParser s String
+nb_double_one_line = many ns_double_char
+
+-- 112
+s_double_escaped :: Stream s Identity Char => Int -> YParser s String
+s_double_escpaed n = do
+    trailing <- many s_white
+    char '\\'
+    b_non_content
+    lines <- many (l_empty n Flow_in)
+    s_flow_line_prefix n
+    return (trailing ++ lines)
+
+-- 113
+s_double_break :: Stream s Identity Char => Int -> YParser s String 
+s_double_break n = choice
+    [ try (s_double_escaped n)
+    , s_flow_folded n
+    ]
+
+-- 114
+nb_ns_double_in_line :: Stream s Identity Char => YParser s String 
+nb_ns_double_in_line = do
+    strings <- many do
+        spaces <- many s_white
+        char <- ns_double_char
+        return (spaces ++ char)
+    return (concat strings)
+
+-- 115
+s_double_next_line :: Stream s Identity Char => Int -> YParser s String 
+s_double_next_line n = do
+    whitespace <- s_double_break n
+    next <- try (option "" do
+        firstChar <- ns_double_char
+        restOfLine <- nb_ns_double_in_line
+        nextLines <- choice
+            [ try (s_double_next_line n)
+            , many s_white
+            ] )
+        return (firstChar : (restOfLine ++ nextLines))
+    return (whitespace ++ next)
+
+-- 116
+nb_double_multi_line :: Stream s Identity Char => Int -> YParser s String 
+nb_double_multi_line n = do
+    line <- nb_ns_double_in_line
+    rest <- choice
+        [ try (s_double_next_line n)
+        , many s_white
+        ]
+    return (line ++ rest)
+
+-- 117
+c_quoted_quote :: Stream s Identity Char => YParser s Char
+c_quoted_quote = do
+    string "''"
+    return '\''
+
+-- 118
+nb_single_char :: Stream s Identity Char => YParser s Char
+nb_single_char = choice
+    [ try c_quoted_quote
+    , satisfy (\c -> 
+        (c != '\'') && (c == '\x09' || (c <= '\x10FFFF' && c >= '\x20')))
+    ]
+
+-- 119
+ns_single_char :: Stream s Identity Char => YParser s Char
+ns_single_char = choice
+    [ try c_quoted_quote
+    , satisfy (\c -> 
+        (notElem c "' ") && (c == '\x09' || (c <= '\x10FFFF' && c >= '\x20')))
+    ]
+
+-- 120
+c_single_quoted :: Stream s Identity Char => Int -> Context -> YParser s String
+c_single_quoted = between (char '\'') (char '\'') (nb_single_text n c)
+
+-- 121
+nb_single_text :: Stream s Identity Char => Int -> Context -> YParser s String
+nb_single_text n Flow_out = nb_single_multi_line n
+nb_single_text n Flow_in = nb_single_multi_line n
+nb_single_text _ Block_key = nb_single_one_line
+nb_single_text _ Flow_key = nb_single_one_line
+
+-- 122 
+nb_single_one_line :: Stream s Identity Char => YParser s String
+nb_single_one_line = many nb_single_char  
     
-    
-parseYaml :: YParser a b
+-- 123
+
+
+
 parseYaml = undefined
