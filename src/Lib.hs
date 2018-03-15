@@ -829,7 +829,7 @@ nb_double_one_line = many ns_double_char
 
 -- 112
 s_double_escaped :: Stream s Identity Char => Int -> YParser s String
-s_double_escpaed n = do
+s_double_escaped n = do
     trailing <- many s_white
     char '\\'
     b_non_content
@@ -915,6 +915,146 @@ nb_single_one_line :: Stream s Identity Char => YParser s String
 nb_single_one_line = many nb_single_char  
     
 -- 123
+nb_ns_single_in_line :: Stream s Identity Char => YParser s String
+nb_ns_single_in_line = do
+    strings <- many do
+        spaces <- many s_white
+        char <- ns_singlechar
+        return (spaces ++ char)
+    return (concat strings)
+
+-- 124
+s_single_next_line :: Stream s Identity Char => Int -> YParser s String
+s_single_next_line n = do
+    whitespace <- s_flow_folded n
+    next <- try (option "" do
+        firstChar <- ns_single_char
+        restOfLine <- nb_ns_single_in_line
+        nextLines <- choice
+            [ try (s_single_next_line n)
+            , many s_white
+            ] )
+        return (firstChar : (restOfLine ++ nextLines))
+    return (whitespace ++ next)
+
+-- 125 
+nb_single_multi_line :: Stream s Identity Char => Int -> YParser s String
+nb_single_multi_line n = do 
+    line <- nb_ns_single_in_line
+    nextLines <- choice
+        [ try (s_single_next_line n)
+        , many s_white
+        ] )
+    return (line ++ nextLines)
+
+-- 126 
+ns_plain_first :: Stream s Identity Char => Context -> YParser s Char
+ns_plain_first c = choice 
+    [ do
+        notFollowedBy c_flow_indicator
+        ns_char 
+    , do
+        ch <- oneOf "?:-"
+        try . lookAhead (ns_plain_safe c)
+        return ch
+
+
+-- 127
+ns_plain_safe :: Stream s Identity Char => Context -> YParser s Char
+ns_plain_safe Flow_out = ns_plain_safe_out
+ns_plain_safe Flow_in = ns_plain_safe_in
+ns_plain_safe Block_out = ns_plain_safe_out
+ns_plain_safe Block_in = ns_plain_safe_in
+ns_plain_safe _ = error "ns_plain_safe: Invalid context"
+
+-- 128
+ns_plain_safe_out :: Stream s Identity Char => YParser s Char
+ns_plain_safe_out = ns_char
+
+-- 129
+ns_plain_safe_in :: Stream s Identity Char => YParser s Char
+ns_plain_safe_in = do
+    notFollowedBy c_flow_indicator
+    ns_char 
+ 
+-- 130
+-- pass previous character to this parser to make sure it's not a space.
+s_ns_plain_char :: Stream s Identity Char => Context -> YParser s Char
+s_ns_plain_char c = choice
+    [ do
+        notFollowedBy . oneOf $ ":#"
+        ns_plain_safe c
+    , do
+        char ':'
+        try . lookAhead (ns_plain_safe c)
+        return ':'
+    ]
+
+ns_ns_plain_char :: Stream s Identity Char => Context -> YParser s Char
+ns_ns_plain_char c = choice
+    [ do
+        notFollowedBy . char $ ':'
+        ns_plain_safe c
+    , do
+        char ':'
+        try . lookAhead (ns_plain_safe c)
+        return ':'
+    ]
+
+-- 131
+ns_plain :: Stream s Identity Char => Int -> Context -> YParser s String
+ns_plain n Flow_out = ns_plain_multi_line n c
+ns_plain n Flow_in = ns_plain_multi_line n c
+ns_plain n Block_key = ns_plain_one_line c
+ns_plain n Flow_key = ns_plain_one_line c
+ns_plain _ _ = error "ns_plain: Invalid context."
+
+-- 132
+-- must include check to make sure ns_plain_char is preceeded by a space
+nb_ns_plain_in_line :: Stream s Identity Char => Context -> YParser s String
+nb_ns_plain_in_line c = do
+    strings <- many . choice
+        [ do 
+            whitespace <- many1 s_white
+            ch <- s_ns_plain_char c 
+            return (whitespace ++ [ch])
+        , do
+            ch <- ns_ns_plain_char
+            return [ch]
+    return . concat $ strings
+
+-- 133
+ns_plain_one_line :: Stream s Identity Char => Context -> YParser s String
+ns_plain_one_line c = do
+    ch <- ns_plain_first c
+    line <- nb_ns_plain_in_line c
+    return (ch : line)
+
+-- 134
+s_ns_plain_next_line :: Stream s Identity Char => Int -> Context -> YParser s String
+s_ns_plain_next_line n c = do
+    whitespace <- s_flow_folded n
+    ch <- if (n == 0 && null whitespace)
+        then ns_ns_plain_char c -- two different version for whitespace prefix.
+        else s_ns_plain_char c 
+    line <- nb_ns_plain_in_line c
+    return (whitespace ++ [ch] ++ line)
+
+-- 135
+ns_plain_multi_line :: Stream s Identity Char => Int -> Context -> YParser s String
+ns_plain_multi_line n c = do
+    firstLine <- ns_plain_one_line c
+    rest <- many s_ns_plain_test_line
+    return (firstLine ++ concat rest)
+
+-- 136
+
+
+
+
+
+
+
 
 
 
