@@ -41,7 +41,7 @@ data YSymbol
     | B_non_content         YSymbol         -- 30
         
 
-data YSerialNode s
+data YSerialNode s m
     = YSNSeq String (s YSerialNode)     -- tag, sequence of nodes
     | YSNAlias String String            -- tag, alias name
     | YSNScalar String String           -- tag, content
@@ -1048,14 +1048,46 @@ ns_plain_multi_line n c = do
     return (firstLine ++ concat rest)
 
 -- 136
+in_flow :: Context -> Context
+in_flow Flow_out = Flow_in
+in_flow Flow_in = Flow_in
+in_flow Flow_key = Flow_key
+in_flow Block_key = Flow_key
+in_flow _ = error "In_flow: Invalid ontext"
+
+-- 137 -- slightly modified with rule 138
+c_flow_sequence :: Stream s Identity Char => Int -> Context -> YParser s [YSerialNode]
+c_flow_sequence n c = between (char '[') (char ']') $ s_flow_seq_entries n (in_flow c)
 
 
+-- 138 slightly modified alongside 137
+s_flow_seq_entries :: Stream s Identity Char => Int -> Context -> YParser s [YSerialNode]
+s_flow_seq_entries n c = (do
+    optional $ s_separate n c
+    node <- ns_flow_seq_entry n c
+    optional $ s_separate n c
+    return node
+    ) `sepBy` (char ',')
 
+-- 139
+s_flow_seq_entry :: Stream s Identity Char => Int -> Context -> YParser s YSerialNode
+s_flow_seq_entry n c = choice
+    [ try $ ns_flow_pair n c
+    , ns_flow_node n c
+    ]
 
+-- 140 modified alongside rule 141
+c_flow_mapping :: Stream s Identity Char => Int -> Context -> YParser s YSerialNode
+c_flow_mapping n c = between (char '{') (char '}') $ s_flow_map_entries n (in_flow c)
 
+-- 141
+s_flow_map_entries :: Stream s Identity Char => Int -> Context -> YParser s (YSerialNode)
+s_flow_map_entries n c = (do
+    optional $ s_separate n c
+    node <- ns_flow_map_entry n c
+    optional $ s_separate n c
+    return node
+    ) `sepBy` (char ',')
 
-
-
-
-
+-- 142
 parseYaml = undefined
